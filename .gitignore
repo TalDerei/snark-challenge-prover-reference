@@ -5,3 +5,8 @@ MNT6753-parameters
 build
 main
 generate_parameters
+MNT4753-output
+MNT4753-output_cuda
+MNT6753-output
+MNT6753-output_cuda
+cuda_prover_piecewise
