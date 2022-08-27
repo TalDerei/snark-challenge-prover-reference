@@ -22,6 +22,7 @@ namespace libff {
 template<mp_size_t n, const bigint<n>& modulus>
 void Fp_model<n,modulus>::mul_reduce(const bigint<n> &other)
 {
+    std::cout << "???????????????????" << std::endl;
     /* stupid pre-processor tricks; beware */
 #if defined(__x86_64__) && defined(USE_ASM)
     if (n == 3)

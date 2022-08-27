@@ -1,3 +1,7 @@
+// Calls CPU-based libsnark functions through a wrapper library to avoid having to include the libsnark headers.
+// Once you have GPU implementations of the expensive algorithms (FFT, multiexp), replace the calls to methods 
+// in B with calls to your GPU functions.
+
 #include <string>
 
 #include <prover_reference_functions.hpp>

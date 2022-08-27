@@ -1,3 +1,5 @@
+// C++ CPU libsnark reference prover
+
 #include <cassert>
 #include <chrono>
 #include <cstdio>
@@ -23,8 +25,8 @@ using namespace libff;
 using namespace libsnark;
 
 // const multi_exp_method method = multi_exp_method_BDLO12;
+// multi_exp_method_bos_coster is faster than multi_exp_method_BDLO12 (3000 ms vs 4700 ms)
 const multi_exp_method method = multi_exp_method_bos_coster;
-
 
 static inline auto now() -> decltype(std::chrono::high_resolution_clock::now()) {
     return std::chrono::high_resolution_clock::now();
@@ -39,6 +41,7 @@ print_time(T &t1, const char *str) {
     t1 = t2;
 }
 
+// Load public parameters (groups of curve points) from MNT4753-parameter and MNT6753-parameter files
 template<typename ppT>
 class groth16_parameters {
   public:
@@ -50,12 +53,19 @@ class groth16_parameters {
   groth16_parameters(const char* path) {
     FILE* params = fopen(path, "r");
     d = read_size_t(params);
+    std::cout << "size of d: " << d << std::endl;
     m = read_size_t(params);
+    std::cout << "size of m: " << m << std::endl;
     for (size_t i = 0; i <= m; ++i) { A.emplace_back(read_g1<ppT>(params)); }
     for (size_t i = 0; i <= m; ++i) { B1.emplace_back(read_g1<ppT>(params)); }
     for (size_t i = 0; i <= m; ++i) { B2.emplace_back(read_g2<ppT>(params)); }
     for (size_t i = 0; i < m-1; ++i) { L.emplace_back(read_g1<ppT>(params)); }
     for (size_t i = 0; i < d; ++i) { H.emplace_back(read_g1<ppT>(params)); }
+    std::cout << "size of A (G1): " << A.size() << std::endl;
+    std::cout << "size of B1 (G1): " << B1.size() << std::endl;
+    std::cout << "size of L (G1): " << L.size() << std::endl;
+    std::cout << "size of H (G1): " << H.size() << std::endl;
+    std::cout << "size of B2 (G2): " << B2.size() << std::endl;
     fclose(params);
   }
 };
@@ -77,6 +87,12 @@ class groth16_input {
     for (size_t i = 0; i < d + 1; ++i) { cc.emplace_back(read_fr<ppT>(inputs)); }
 
     r = read_fr<ppT>(inputs);
+
+    std::cout << "size of w: " << w.size() << std::endl;
+    std::cout << "size of ca: " << ca.size() << std::endl;
+    std::cout << "size of cb: " << cb.size() << std::endl;
+    std::cout << "size of cc: " << cc.size() << std::endl;
+
 
     fclose(inputs);
   }
@@ -102,20 +118,20 @@ class groth16_output {
 
 // Here is where all the FFTs happen.
 template<typename ppT>
-std::vector<Fr<ppT>> compute_H(
-    size_t d,
-    std::vector<Fr<ppT>> &ca,
-    std::vector<Fr<ppT>> &cb,
-    std::vector<Fr<ppT>> &cc)
-{
+std::vector<Fr<ppT>> compute_H(size_t d, std::vector<Fr<ppT>> &ca, std::vector<Fr<ppT>> &cb, std::vector<Fr<ppT>> &cc) {
     // Begin witness map
     libff::enter_block("Compute the polynomial H");
 
-    const std::shared_ptr<libfqfft::evaluation_domain<Fr<ppT>> > domain = libfqfft::get_evaluation_domain<Fr<ppT>>(d + 1);
+    // Recall QAP, polynomial H(X) = [A(X) * B(X) – C(X)] / Z(X)
 
+    // Construct an evaluation domain S of size m (related to FFTs)
+    const std::shared_ptr<libfqfft::evaluation_domain<Fr<ppT>> > domain = libfqfft::get_evaluation_domain<Fr<ppT>>(d + 1);
+      
+    // Compute the inverse FFT, over the domain S, of the vector a and b 
     domain->iFFT(ca);
     domain->iFFT(cb);
 
+    // Compute the FFT, over the domain g*S, of the vector a and b
     domain->cosetFFT(ca, Fr<ppT>::multiplicative_generator);
     domain->cosetFFT(cb, Fr<ppT>::multiplicative_generator);
 
@@ -130,13 +146,16 @@ std::vector<Fr<ppT>> compute_H(
     }
     std::vector<Fr<ppT>>().swap(cb); // destroy cb
 
+    // Compute the inverse FFT, over the domain S, of the vector c
     domain->iFFT(cc);
 
+    // Compute the FFT, over the domain g*S, of the vector c
     domain->cosetFFT(cc, Fr<ppT>::multiplicative_generator);
 
 #ifdef MULTICORE
 #pragma omp parallel for
 #endif
+    // Calculate H corresponds FieldT::multiplicative_generator
     for (size_t i = 0; i < domain->m; ++i)
     {
         H_tmp[i] = (H_tmp[i]-cc[i]);
@@ -146,6 +165,7 @@ std::vector<Fr<ppT>> compute_H(
 
     libff::leave_block("Compute evaluation of polynomial H on set T");
 
+    // Calculate coefficient for H polynomial (by inverse Fourier Transform)
     domain->icosetFFT(H_tmp, Fr<ppT>::multiplicative_generator);
 
     std::vector<Fr<ppT>> coefficients_for_H(domain->m+1, Fr<ppT>::zero());
@@ -184,24 +204,26 @@ G multiexp(typename std::vector<Fr>::const_iterator scalar_start,
 
 }
 
+// Execute C++ prover on a specified elliptic curve 
 template<typename ppT>
-int run_prover(
-    const char* params_path,
-    const char* input_path,
-    const char* output_path)
-{
+int run_prover(const char* params_path, const char* input_path, const char* output_path) {
+    // Initialize the curve parameters defined in libff/
     ppT::init_public_params();
 
+    // Start timer 
     auto beginning = now();
     auto t = beginning;
 
+    // Still determining what this parameter is for
     const size_t primary_input_size = 1;
 
+    // Load groth16 parameters from public file
     const groth16_parameters<ppT> parameters(params_path);
     print_time(t, "load params");
 
     auto t_main = t;
 
+    // Load inputs 
     const groth16_input<ppT> input(input_path, parameters.d, parameters.m);
 
     print_time(t, "load inputs");
@@ -215,9 +237,8 @@ int run_prover(
 
     libff::enter_block("Call to r1cs_gg_ppzksnark_prover");
 
-    std::vector<Fr<ppT>> coefficients_for_H = compute_H<ppT>(
-        parameters.d,
-        ca, cb, cc);
+    // Call compute_H to compute FFT calculations
+    std::vector<Fr<ppT>> coefficients_for_H = compute_H<ppT>(parameters.d, ca, cb, cc);
 
     libff::enter_block("Compute the proof");
     libff::enter_block("Multi-exponentiations");
@@ -271,8 +292,116 @@ int run_prover(
     return 0;
 }
 
+template<typename ppT>
+void write_g1_vec(FILE *out, const std::vector<G1<ppT>> &vec) {
+    for (const auto &P : vec)
+        write_g1<ppT>(out, P);
+}
+
+template<typename ppT>
+void write_g2_vec(FILE *out, const std::vector<G2<ppT>> &vec) {
+    for (const auto &P : vec)
+        write_g2<ppT>(out, P);
+}
+
+template<typename ppT>
+void output_g1_multiples(int C, const std::vector<G1<ppT>> &vec, FILE *output) {
+    // If vec = [P0, ..., Pn], then multiples holds an array
+    //
+    // [    P0, ...,     Pn,
+    //     2P0, ...,    2Pn,
+    //     3P0, ...,    3Pn,
+    //          ...,
+    //  2^(C-1) P0, ..., 2^(C-1) Pn]
+    std::vector<G1<ppT>> multiples;
+    size_t len = vec.size();
+    multiples.resize(len * ((1U << C) - 1));
+    std::copy(vec.begin(), vec.end(), multiples.begin());
+
+    for (size_t i = 1; i < (1U << C) - 1; ++i) {
+        size_t prev_row_offset = (i-1)*len;
+        size_t curr_row_offset = i*len;
+#ifdef MULTICORE
+#pragma omp parallel for
+#endif
+        for (size_t j = 0; j < len; ++j)
+           multiples[curr_row_offset + j] = vec[j] + multiples[prev_row_offset + j];
+    }
+
+    if (multiples.size() != ((1U << C) - 1)*len) {
+        fprintf(stderr, "Broken preprocessing table: got %zu, expected %zu\n",
+                multiples.size(), ((1U << C) - 1) * len);
+        abort();
+    }
+    write_g1_vec<ppT>(output, multiples);
+}
+
+template<typename ppT>
+void output_g2_multiples(int C, const std::vector<G2<ppT>> &vec, FILE *output) {
+    // If vec = [P0, ..., Pn], then multiples holds an array
+    //
+    // [    P0, ...,     Pn,
+    //     2P0, ...,    2Pn,
+    //     3P0, ...,    3Pn,
+    //          ...,
+    //  2^(C-1) P0, ..., 2^(C-1) Pn]
+    std::vector<G2<ppT>> multiples;
+    size_t len = vec.size();
+    multiples.resize(len * ((1U << C) - 1));
+    std::copy(vec.begin(), vec.end(), multiples.begin());
+
+    for (size_t i = 1; i < (1U << C) - 1; ++i) {
+        size_t prev_row_offset = (i-1)*len;
+        size_t curr_row_offset = i*len;
+#ifdef MULTICORE
+#pragma omp parallel for
+#endif
+        for (size_t j = 0; j < len; ++j)
+           multiples[curr_row_offset + j] = vec[j] + multiples[prev_row_offset + j];
+    }
+
+    if (multiples.size() != ((1U << C) - 1)*len) {
+        fprintf(stderr, "Broken preprocessing table: got %zu, expected %zu\n",
+                multiples.size(), ((1U << C) - 1) * len);
+        abort();
+    }
+    write_g2_vec<ppT>(output, multiples);
+}
+
+template <typename ppT>
+void run_preprocess(const char *params_path, const char *output_path)
+{
+    ppT::init_public_params();
+
+    const groth16_parameters<ppT> params(params_path);
+
+    // We will produce 2^C precomputed points [i]P for i = 1..2^C
+    // for every input point P
+    static constexpr size_t C = 5;
+
+    size_t d = params.d, m =  params.m;
+    printf("d = %zu, m = %zu, C = %zu\n", d, m, C);
+
+    FILE *output = fopen(output_path, "w");
+
+//    printf("Processing A...\n");
+//    output_g1_multiples<ppT>(C, params.A, output);
+    printf("Processing B1...\n");
+    output_g1_multiples<ppT>(C, params.B1, output);
+    printf("Processing B2...\n");
+    output_g2_multiples<ppT>(C, params.B2, output);
+    printf("Processing L...\n");
+    output_g1_multiples<ppT>(C, params.L, output);
+//    printf("Processing H...\n");
+//    output_g1_multiples<ppT>(C, params.H, output);
+
+    fclose(output);
+}
+
+// Main function
 int main(int argc, const char * argv[])
 {
+  // User inputs via CLI
   setbuf(stdout, NULL);
   std::string curve(argv[1]);
   std::string mode(argv[2]);
@@ -281,14 +410,22 @@ int main(int argc, const char * argv[])
   const char* input_path = argv[4];
   const char* output_path = argv[5];
 
-  if (curve == "MNT4753") {
-    if (mode == "compute") {
-      return run_prover<mnt4753_pp>(params_path, input_path, output_path);
-    }
-  } else if (curve == "MNT6753") {
-    if (mode == "compute") {
-      return run_prover<mnt6753_pp>(params_path, input_path, output_path);
-    }
+  // Run prover on different curves
+  if (mode == "compute") {
+      const char *input_path = argv[4];
+      const char *output_path = argv[5];
+
+      if (curve == "MNT4753") {
+          run_prover<mnt4753_pp>(params_path, input_path, output_path);
+      } else if (curve == "MNT6753") {
+          run_prover<mnt6753_pp>(params_path, input_path, output_path);
+      }
+  } else if (mode == "preprocess") {
+      if (curve == "MNT4753") {
+          run_preprocess<mnt4753_pp>(params_path, "MNT4753_preprocessed");
+      } else if (curve == "MNT6753") {
+          run_preprocess<mnt6753_pp>(params_path, "MNT6753_preprocessed");
+      }
   }
 }
 
@@ -300,6 +437,7 @@ void debug(
 
     const size_t primary_input_size = 1;
 
+    // Primary input = statement, Auxilary input = witness
     std::vector<Fr<ppT>> primary_input(w.begin() + 1, w.begin() + 1 + primary_input_size);
     std::vector<Fr<ppT>> auxiliary_input(w.begin() + 1 + primary_input_size, w.end() );
 

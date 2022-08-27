@@ -10,3 +10,9 @@ MNT4753-output_cuda
 MNT6753-output
 MNT6753-output_cuda
 cuda_prover_piecewise
+
+cuda-fixnum/CMakeCache.txt
+cuda-fixnum/CMakeFiles/
+cuda-fixnum/Makefile
+cuda-fixnum/cmake_install.cmake
+cuda-fixnum/detect_cuda_compute_capabilities.cpp
