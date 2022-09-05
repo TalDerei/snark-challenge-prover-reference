@@ -3,7 +3,7 @@
 - [x] Initialize base repo _snark-challenge-prover-reference_
 - [ ] Work on tutorials and coda workshop: https://coinlist.co/build/coda/pages/prover#starter-code
     - [x] Starter Code: Field Arithmetic
-    - [ ] Stage 1: Quadratic Extension Arithmetic
+    - [x] Stage 1: Quadratic Extension Arithmetic
     - [ ] Stage 2: Cubic Extension Arithmetic
     - [ ] Stage 3: Curve Operations
 - [ ] Add general comments to the codebase to understand the general flows for the C++ prover
