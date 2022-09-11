@@ -36,7 +36,7 @@ Q. How can we make "map" (scale function) efficient?
 
 *Stage 0: Field Arithmetic*
 
-Tutorial starter code implements Field Arithmetic (called modular multiplication): multiply together arrays of elements of a prime-order field using montgomery arithmetic.
+Problem: Use field arithmetic (called modular multiplication) to multiply together arrays of elements of a prime-order field using montgomery arithmetic.
 
 Montgomery representation is alternative way of representing elements of F_q for more efficient multiplication. Let q be MNT4753.q/MNT6753.q and R = 2^768. The Montgomery representation of the nubmer x (e.g. 5) is (xR) mod q. This number then is represented as a little-endian length 12 array of 64-bit integers, where each element in the array is called a limb. 
 
@@ -100,3 +100,21 @@ The elements of the cubic extension field Fq^3 are of the form: a0 + a1x + a2x^2
            = a_0b_0 + a_0b1x + a_0b_2x^2 + a1b_0x + a_1b_1x^2 + a_1b_2x^3 + a_2b_0x^2 + a_2b_1x^3 + a_2b_2x^4
            = a_0b_0 + a_0b1x + a_0b_2x^2 + a1b_0x + a_1b_1x^2 + 11a_1b_2 + a_2b_0x^2 + 11a_2b_1 + 11a_2b_2x
            = (a_0b_0 + 11a_1b_2 + 11a_2b_1) + (a_0b1 + a1b_0 + 11a_2b_2)x + (a_0b_2 + a_1b_1 + a_2b_0)x^2
+
+*Stage 3: Curve Operations*
+
+Problem: Perform group operations for four elliptic curves.
+
+A single SNARK proving / verifying system is a pair of elliptic curves (G1, G2). Since we're optimizing it for both MNT4 and MNT6, we have 4 curves:
+  1. MNT4 G1
+  2. MNT4 G2
+  3. MNT6 G1
+  4. MNT6 G2
+
+Each curve is specified by a pair of two of these elements from the finite fields, specifically:
+  MNT4 G1: (Fq, Fq)
+  MNT4 G2: (Fq2, Fq2)
+  MNT6 G1: (Fq, Fq)
+  MNT6 G2: (Fq3, Fq3)
+
+To refresh, G1 and G2 are cyclic groups of prime order q, with generator p. 
