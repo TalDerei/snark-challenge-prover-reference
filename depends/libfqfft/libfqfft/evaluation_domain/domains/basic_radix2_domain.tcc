@@ -20,11 +20,14 @@
 
 #include <libfqfft/evaluation_domain/domains/basic_radix2_domain_aux.hpp>
 
+using namespace std;
+
 namespace libfqfft {
 
 template<typename FieldT>
 basic_radix2_domain<FieldT>::basic_radix2_domain(const size_t m, bool &err) : evaluation_domain<FieldT>(m)
 {
+    cout << "entered basic_radix2_domain!" << endl;
     if (m <= 1) {
       err = true;
       omega = FieldT(1);

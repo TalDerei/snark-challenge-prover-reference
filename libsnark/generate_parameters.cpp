@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstdio>
 #include <fstream>
+#include <chrono>
 
 #include <libff/common/rng.hpp>
 #include <libff/common/profiling.hpp>
@@ -19,6 +20,19 @@ using namespace libsnark;
 using namespace libff;
 
 const bool debug = false;
+
+static inline auto now() -> decltype(std::chrono::high_resolution_clock::now()) {
+    return std::chrono::high_resolution_clock::now();
+}
+
+template<typename T>
+void
+print_time(T &t1, const char *str) {
+    auto t2 = std::chrono::high_resolution_clock::now();
+    auto tim = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+    printf("%s: %ld ms\n", str, tim);
+    t1 = t2;
+}
 
 template<typename ppT>
 int generate_paramaters(
@@ -124,7 +138,7 @@ int generate_paramaters(
 
 int main(int argc, const char * argv[])
 {
-  int log2_d_4753 = 20, log2_d_6753 = 15;
+  int log2_d_4753 = 17, log2_d_6753 = 15;
   if (argc > 1) {
     std::string fastflag(argv[1]);
     if (fastflag == "fast") {
@@ -132,6 +146,13 @@ int main(int argc, const char * argv[])
       log2_d_6753 = 10;
     }
   }
+  auto beginning = now();
+  auto t = beginning;
+  print_time(t, "start");
   generate_paramaters<mnt4753_pp>(log2_d_4753, "MNT4753-parameters", "MNT4753-input");
   generate_paramaters<mnt6753_pp>(log2_d_6753, "MNT6753-parameters", "MNT6753-input");
+  
+  auto t_main = t;
+  print_time(t, "end");
+
 }

@@ -23,6 +23,10 @@
 
 using namespace libff;
 using namespace libsnark;
+using namespace std;
+
+const unsigned int io_bytes_per_elem = 96;
+const unsigned int bytes_per_elem = 128;
 
 // const multi_exp_method method = multi_exp_method_BDLO12;
 // multi_exp_method_bos_coster is faster than multi_exp_method_BDLO12 (3000 ms vs 4700 ms)
@@ -30,6 +34,10 @@ const multi_exp_method method = multi_exp_method_bos_coster;
 
 static inline auto now() -> decltype(std::chrono::high_resolution_clock::now()) {
     return std::chrono::high_resolution_clock::now();
+}
+
+void print_G1(libff::G1<mnt4753_pp> *a) { 
+    a->print();
 }
 
 template<typename T>
@@ -45,9 +53,13 @@ print_time(T &t1, const char *str) {
 template<typename ppT>
 class groth16_parameters {
   public:
+    // d corresponds to the number of constraints
     size_t d;
+    // m corresponds to the number of variables in the constraint system
     size_t m;
+    // Public parameters from G1 elliptic curve
     std::vector<G1<ppT>> A, B1, L, H;
+    // Public parameters from G2 elliptic curve
     std::vector<G2<ppT>> B2;
 
   groth16_parameters(const char* path) {
@@ -116,22 +128,33 @@ class groth16_output {
   }
 };
 
-// Here is where all the FFTs happen.
+// Here is where all the FFTs happen
 template<typename ppT>
 std::vector<Fr<ppT>> compute_H(size_t d, std::vector<Fr<ppT>> &ca, std::vector<Fr<ppT>> &cb, std::vector<Fr<ppT>> &cc) {
     // Begin witness map
     libff::enter_block("Compute the polynomial H");
 
-    // Recall QAP, polynomial H(X) = [A(X) * B(X) – C(X)] / Z(X)
+    // Implemented by using libfqfft library, the following represents the engine for calculating 
+    // Fast fourier and inverse fourier transform.
 
-    // Construct an evaluation domain S of size m (related to FFTs)
+    // Construct polynomial ca, cb, cc and domain size m.
+    // Then, we get an evaluation domain by calling get_evaluation_domain(m) which will 
+    // Determine the best suitable domain to perform evaluation on given the domain size.
+
+    //  Roughly, given a desired size m for the domain, the constructor selects
+    //  a choice of domain S with size ~m that has been selected so to optimize
+    //  - computations of Lagrange polynomials, and
+    //  - FFT/iFFT computations.
+    //  An evaluation domain also provides other other functions, e.g., accessing
+    //  individual elements in S or evaluating its vanishing polynomial.
+    // *** CURRENTLY CHOOSING THE 'basic_radix2_domain' DOMAIN ***
     const std::shared_ptr<libfqfft::evaluation_domain<Fr<ppT>> > domain = libfqfft::get_evaluation_domain<Fr<ppT>>(d + 1);
       
-    // Compute the inverse FFT, over the domain S, of the vector a and b 
+    // Compute the inverse FFT, over the domain S, of the vector ca and cb
     domain->iFFT(ca);
     domain->iFFT(cb);
 
-    // Compute the FFT, over the domain g*S, of the vector a and b
+    // Calculate ca and cb corresponds FieldT::multiplicative_generator
     domain->cosetFFT(ca, Fr<ppT>::multiplicative_generator);
     domain->cosetFFT(cb, Fr<ppT>::multiplicative_generator);
 
@@ -140,8 +163,10 @@ std::vector<Fr<ppT>> compute_H(size_t d, std::vector<Fr<ppT>> &ca, std::vector<F
 #ifdef MULTICORE
 #pragma omp parallel for
 #endif
+    // Establish C polynomial (by inverse Fourier Transform)
     for (size_t i = 0; i < domain->m; ++i)
     {
+        // Recall QAP: polynomial H(X) = [A(X) * B(X) – C(X)] / Z(X)
         H_tmp[i] = ca[i]*cb[i];
     }
     std::vector<Fr<ppT>>().swap(cb); // destroy cb
@@ -149,7 +174,7 @@ std::vector<Fr<ppT>> compute_H(size_t d, std::vector<Fr<ppT>> &ca, std::vector<F
     // Compute the inverse FFT, over the domain S, of the vector c
     domain->iFFT(cc);
 
-    // Compute the FFT, over the domain g*S, of the vector c
+    // Calculate coefficient for C polynomial (by inverse Fourier Transform)
     domain->cosetFFT(cc, Fr<ppT>::multiplicative_generator);
 
 #ifdef MULTICORE
@@ -182,11 +207,13 @@ std::vector<Fr<ppT>> compute_H(size_t d, std::vector<Fr<ppT>> &ca, std::vector<F
     return coefficients_for_H;
 }
 
+// Here is where all the Multiexponentiations happen
 template<typename G, typename Fr>
 G multiexp(typename std::vector<Fr>::const_iterator scalar_start,
            typename std::vector<G>::const_iterator g_start,
            size_t length)
 {
+  cout << "length is: " << length << endl;
 #ifdef MULTICORE
     const size_t chunks = omp_get_max_threads(); // to override, set OMP_NUM_THREADS env var or call omp_set_num_threads()
 #else
@@ -200,13 +227,63 @@ G multiexp(typename std::vector<Fr>::const_iterator scalar_start,
         g_start + length,
         scalar_start,
         scalar_start + length,
+        // 1. define chunking (function of understanding the algorithm and the archicture your targeting)
+        // 2. Understand the memory pipeline that those chunks are operating in
+        // 3. Pin certain parts of the most intensive parts of the computation into VRAM (32 G)
+        // 4. Doing this computation on multiple cores with a defined memory map requires memory synchronzation beteween those cores + and the host/device 
         chunks);
 
 }
 
+template <typename curve>
+void read_mnt_fq_montgomery(uint8_t *dest, FILE *inputs)
+{
+  // cout << "entered read_mnt_fq_montgomery " << endl;
+  Fq<curve> x;
+  fread((void *)(x.mont_repr.data), io_bytes_per_elem * sizeof(uint8_t), 1, inputs);
+  // cout << "x is: " << x << endl;
+  memcpy(dest, (uint8_t *)x.as_bigint().data, io_bytes_per_elem);
+}
+
+template <typename curve>
+void read_mnt_g1_montgomery(uint8_t *dest, FILE *inputs)
+{
+  // cout << "entered read_mnt_g1_montgomery " << endl;
+  // Need to call read_mnt_fq_montgomery twice to read in two elements from the Fq field
+  read_mnt_fq_montgomery<curve>(dest, inputs);
+  read_mnt_fq_montgomery<curve>(dest + bytes_per_elem, inputs);
+  // Then we're copying 1 for our result array
+  memcpy(dest + 2 * bytes_per_elem, (void *)Fq<mnt4753_pp>::one().as_bigint().data, io_bytes_per_elem);
+  // cout << "Fq<mnt4753_pp>::one() is " << Fq<mnt4753_pp>::one().as_bigint() << endl;
+}
+
+void read_mnt4_g1_montgomery(uint8_t *dest, FILE *inputs)
+{
+  read_mnt_g1_montgomery<mnt4753_pp>(dest, inputs);
+}
+
+void print_array(uint8_t *a)
+{
+  for (int j = 0; j < 128; j++)
+  {
+    printf("%x ", ((uint8_t *)(a))[j]);
+  }
+  printf("\n");
+}
+
+void printG1(uint8_t *src)
+{
+  printf("X:\n");
+  print_array(src);
+  printf("Y:\n");
+  print_array(src + bytes_per_elem);
+  printf("Z:\n");
+  print_array(src + 2 * bytes_per_elem);
+}
+
 // Execute C++ prover on a specified elliptic curve 
 template<typename ppT>
-int run_prover(const char* params_path, const char* input_path, const char* output_path) {
+int run_prover(FILE *inputs, size_t n, const char* params_path, const char* input_path, const char* output_path) {
     // Initialize the curve parameters defined in libff/
     ppT::init_public_params();
 
@@ -216,6 +293,17 @@ int run_prover(const char* params_path, const char* input_path, const char* outp
 
     // Still determining what this parameter is for
     const size_t primary_input_size = 1;
+
+    // Alternaitve method to reading in files
+    // cout << "Reading the elements from file for MNT4 G1 curve" << endl;
+    // uint8_t *x0 = new uint8_t[3 * n * bytes_per_elem];
+    // memset(x0, 0, 3 * n * bytes_per_elem);
+    // for (size_t i = 0; i < n; ++i)
+    // {     
+    //   // read the elements of mnt4 g1 that are in montgomery form
+    //   read_mnt4_g1_montgomery(x0 + 3 * i * bytes_per_elem, inputs);
+    // }
+    // printG1(x0);
 
     // Load groth16 parameters from public file
     const groth16_parameters<ppT> parameters(params_path);
@@ -236,16 +324,22 @@ int run_prover(const char* params_path, const char* input_path, const char* outp
     // End reading of parameters and input
 
     libff::enter_block("Call to r1cs_gg_ppzksnark_prover");
+    
+    print_time(t, "Intermediary ------------------------------------------------------------------ ");
 
     // Call compute_H to compute FFT calculations
     std::vector<Fr<ppT>> coefficients_for_H = compute_H<ppT>(parameters.d, ca, cb, cc);
+      
+    print_time(t, "FFTs !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! ");
 
     libff::enter_block("Compute the proof");
     libff::enter_block("Multi-exponentiations");
 
     // Now the 5 multi-exponentiations
-    libff::enter_block("A G1 multiexp");
+    libff::enter_block("A G1s multiexp");
     G1<ppT> evaluation_At = multiexp<G1<ppT>, Fr<ppT>>(
+        // Input = A: Array(G1, m+1)
+        // Scalar = w: Array(F, m+1)
         w.begin(), parameters.A.begin(), parameters.m + 1);
     libff::leave_block("A G1 multiexp");
 
@@ -274,6 +368,9 @@ int run_prover(const char* params_path, const char* input_path, const char* outp
     libff::G1<ppT> C = evaluation_Ht + evaluation_Lt + input.r * evaluation_Bt1; /*+ s *  g1_A  - (r * s) * pk.delta_g1; */
 
     libff::leave_block("Multi-exponentiations");
+
+    print_time(t, "MSM ???????????????????????????????????????????????????????????????????????????????/ ");
+
     libff::leave_block("Compute the proof");
     libff::leave_block("Call to r1cs_gg_ppzksnark_prover");
 
@@ -398,37 +495,6 @@ void run_preprocess(const char *params_path, const char *output_path)
     fclose(output);
 }
 
-// Main function
-int main(int argc, const char * argv[])
-{
-  // User inputs via CLI
-  setbuf(stdout, NULL);
-  std::string curve(argv[1]);
-  std::string mode(argv[2]);
-
-  const char* params_path = argv[3];
-  const char* input_path = argv[4];
-  const char* output_path = argv[5];
-
-  // Run prover on different curves
-  if (mode == "compute") {
-      const char *input_path = argv[4];
-      const char *output_path = argv[5];
-
-      if (curve == "MNT4753") {
-          run_prover<mnt4753_pp>(params_path, input_path, output_path);
-      } else if (curve == "MNT6753") {
-          run_prover<mnt6753_pp>(params_path, input_path, output_path);
-      }
-  } else if (mode == "preprocess") {
-      if (curve == "MNT4753") {
-          run_preprocess<mnt4753_pp>(params_path, "MNT4753_preprocessed");
-      } else if (curve == "MNT6753") {
-          run_preprocess<mnt6753_pp>(params_path, "MNT6753_preprocessed");
-      }
-  }
-}
-
 template<typename ppT>
 void debug(
     Fr<ppT>& r,
@@ -478,4 +544,46 @@ void debug(
           primary_input,
           auxiliary_input);
     assert (r1cs_gg_ppzksnark_verifier_strong_IC<ppT>(vk, primary_input, proof1) );
+}
+
+// Main function
+int main(int argc, const char * argv[])
+{
+  // User inputs via CLI
+  setbuf(stdout, NULL);
+  std::string curve(argv[1]);
+  std::string mode(argv[2]);
+
+  const char* params_path = argv[3];
+  const char* input_path = argv[4];
+  const char* output_path = argv[5];
+
+  // Run prover on different curves
+  if (mode == "compute") {
+      const char *input_path = argv[4];
+      const char *output_path = argv[5];
+    
+        FILE *inputs = fopen(argv[3], "r");
+        size_t d = read_size_t(inputs);
+        std::cout << "size of d: " << d << std::endl;
+        size_t m = read_size_t(inputs);
+        std::cout << "size of m: " << m << std::endl;
+        size_t z = read_size_t(inputs);
+        std::cout << "size of z: " << z << std::endl;
+        size_t n;
+        size_t elts_read = fread((void *)&n, sizeof(size_t), 1, inputs);
+        std::cerr << n << std::endl;
+
+      if (curve == "MNT4753") {
+          run_prover<mnt4753_pp>(inputs, n, params_path, input_path, output_path);
+      } else if (curve == "MNT6753") {
+          run_prover<mnt6753_pp>(inputs, n, params_path, input_path, output_path);
+      }
+  } else if (mode == "preprocess") {
+      if (curve == "MNT4753") {
+          run_preprocess<mnt4753_pp>(params_path, "MNT4753_preprocessed");
+      } else if (curve == "MNT6753") {
+          run_preprocess<mnt6753_pp>(params_path, "MNT6753_preprocessed");
+      }
+  }
 }

@@ -118,3 +118,37 @@ Each curve is specified by a pair of two of these elements from the finite field
   MNT6 G2: (Fq3, Fq3)
 
 To refresh, G1 and G2 are cyclic groups of prime order q, with generator p. 
+```
+
+**Groth16 SNARK Prover:**
+
+Performs: 7 FFTs (3 FFTs and 4 inverse FFTs to compute the array H), 4 multiexponentiations in G1, and 1 multiexponentiation in G2
+
+The following problem is defined for any choice of (F, G1, G2) in:
+  - MNT4753(F_MNT4753.r, MNT4753.G1, MNT4753.G2)
+  - MNT6753(F_MNT6753.r, MNT6753.G1, MNT6753.G2)
+
+1. Parameters: the parameters will be generated once and preproccessed
+  - d: uint64
+  - m: uint64
+  - A: Array(G1, m+1)
+  - B1: Array(G1, m+1)
+  - B2: Array(G2, m+2)
+  - L: Array(G1, m-1)
+  - T: Array(G1, d)
+
+2. Input
+  - w: Array(F, m+1)
+  - ca: Array(F, d+1)
+  - cb: Array(F, d+1)
+  - cc: Array(F, d+1)
+  - r: F
+
+3. Output
+  - proof: (A: G1, B: G2, C: G1)
+
+The output should be as follows:
+
+A = summation (i = 0 to m): w[i] x A[i]
+B = summation (i = 0 to m): w[i] x B2[i]
+C = summation (i = 2 to m): w[i] x L[i-2] + summation (i = 0 to d-1): H[i] x T[i] + r * summation (i = 0 to m): w[i] x B1[i] 

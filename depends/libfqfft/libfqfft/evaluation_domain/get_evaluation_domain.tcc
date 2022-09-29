@@ -27,6 +27,8 @@
 #include <libfqfft/evaluation_domain/evaluation_domain.hpp>
 #include <libfqfft/tools/exceptions.hpp>
 
+using namespace std;
+
 namespace libfqfft {
 
 // Should be
@@ -58,6 +60,7 @@ size_t best_mixed_domain_size(const size_t min_size)
 template<typename FieldT>
 std::shared_ptr<evaluation_domain<FieldT> > get_evaluation_domain(const size_t min_size)
 {
+    cout << "Min_size is: " << min_size << endl;
     std::shared_ptr<evaluation_domain<FieldT> > result;
 
     const size_t big = 1ul<<(libff::log2(min_size)-1);
@@ -67,6 +70,7 @@ std::shared_ptr<evaluation_domain<FieldT> > get_evaluation_domain(const size_t m
     bool err = false;
     auto basic = new basic_radix2_domain<FieldT>(min_size, err);
     if (!err) {
+      cout << "entered basic_radix2_domain domain!" << endl;
       result.reset(basic);
       return result;
     }
@@ -74,6 +78,7 @@ std::shared_ptr<evaluation_domain<FieldT> > get_evaluation_domain(const size_t m
 
     auto extended = new extended_radix2_domain<FieldT>(min_size, err);
     if (!err) {
+      cout << "chose extended_radix2_domain domain!" << endl;
       result.reset(extended);
       return result;
     }
@@ -81,6 +86,7 @@ std::shared_ptr<evaluation_domain<FieldT> > get_evaluation_domain(const size_t m
 
     auto step = new step_radix2_domain<FieldT>(min_size, err);
     if (!err) {
+      cout << "chose step_radix2_domain domain!" << endl;
       result.reset(step);
       return result;
     }
@@ -88,6 +94,7 @@ std::shared_ptr<evaluation_domain<FieldT> > get_evaluation_domain(const size_t m
 
     auto basic2 = new basic_radix2_domain<FieldT>(big + rounded_small, err);
     if (!err) {
+      cout << "chose basic_radix2_domain domain!" << endl;
       result.reset(basic2);
       return result;
     }
@@ -95,6 +102,7 @@ std::shared_ptr<evaluation_domain<FieldT> > get_evaluation_domain(const size_t m
 
     auto extended2 = new extended_radix2_domain<FieldT>(big + rounded_small, err);
     if (!err) {
+      cout << "chose extended_radix2_domain domain!" << endl;
       result.reset(extended2);
       return result;
     }
@@ -102,6 +110,7 @@ std::shared_ptr<evaluation_domain<FieldT> > get_evaluation_domain(const size_t m
 
     auto step2 = new step_radix2_domain<FieldT>(big + rounded_small, err);
     if (!err) {
+      cout << "chose step_radix2_domain domain!" << endl;
       result.reset(step2);
       return result;
     }
@@ -111,6 +120,7 @@ std::shared_ptr<evaluation_domain<FieldT> > get_evaluation_domain(const size_t m
       const size_t s = best_mixed_domain_size<FieldT>(min_size);
       auto mixed = new basic_radix2_domain<FieldT>(s, err);
       if (!err) {
+        cout << "chose small_subgroup_defined domain!" << endl;
         result.reset(mixed);
         return result;
       }
@@ -119,6 +129,7 @@ std::shared_ptr<evaluation_domain<FieldT> > get_evaluation_domain(const size_t m
 
     auto geometric = new geometric_sequence_domain<FieldT>(min_size, err);
     if (!err) {
+      cout << "chose geometric_sequence_domain domain!" << endl;
       result.reset(geometric);
       return result;
     }
@@ -126,6 +137,7 @@ std::shared_ptr<evaluation_domain<FieldT> > get_evaluation_domain(const size_t m
 
     auto arithmetic = new arithmetic_sequence_domain<FieldT>(min_size, err);
     if (!err) {
+      cout << "chose arithmetic_sequence_domain domain!" << endl;
       result.reset(arithmetic);
       return result;
     }
